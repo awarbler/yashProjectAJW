@@ -30,6 +30,13 @@ void sig_handler(int signo) {
     if (send(sockfd, ctl_msg, strlen(ctl_msg), 0) < 0) {
         perror("Failed to send control signal");
     }
+
+    // closes the socket on the ctrl c or ctrl z to gracefully terminate 
+    if ( signo == SIGINT || signo == SIGTSTP) {
+        printf("Terminating client ....\n");
+        close(sockfd);
+        exit(0);
+    }
     printf(" Control signal sent to server. \n");
 }
 
@@ -69,10 +76,10 @@ void send_command_to_server(const char *command) {
     //int valread = recv(sockfd, buf, BUFFER_SIZE, 0);
     if (valread < 0) {
         perror("Error receiving response");
-    } else if (valread > 0) {
-        printf("%s", buf); // print the servers response
-        printf("Client received: %s", buf); // print the servers response
-    }
+    } //else if (valread > 0) {
+        //printf("%s", buf); // print the servers response
+        //printf("Client received: %s", buf); // print the servers response
+    //}
 }
 
 // handle plain text input after issuing commands like cat 
