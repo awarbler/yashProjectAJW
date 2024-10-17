@@ -731,19 +731,12 @@ void fg_job(int job_id) {
 void bg_job(int job_id) {
     for (int i = 0; i < job_count; i++) {
         if (jobs[i].job_id == job_id && !jobs[i].is_running) {
-          // resume the jobs in the backgroun 
+          // resume the jobs in the background 
           kill(-jobs[i].pid, SIGCONT);
           jobs[i].is_running = 1;
-          printf("[%d] + %s &\n", jobs[i].job_id, jobs[i].command); // prints teh command when bringing to the foreground
+          printf("[%d] + %s &\n", jobs[i].job_id, jobs[i].command); // prints the command when bringing to the foreground
           return;
         }
     }
     printf("Job not found or already running\n");
-}
-
-void setup_signal_handler() {
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = SIG_IGN;
-  sigaction(SIGCHLD, &sa, NULL);
 }
