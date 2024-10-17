@@ -55,6 +55,7 @@ void apply_redirections(char **cmd_args);
 void run_in_background(char **cmd_args);
 void update_job_markers(int current_job_index) ;
 void remove_elements(char **args, int start, int count);
+void setup_signal_handlers();
 
 
 int main() {
@@ -278,7 +279,6 @@ void execute_command(char **cmd_args, char *original_cmd){
 void handle_redirection(char **cmd_args){
     apply_redirections(cmd_args);
 }
-
 // function to handle piping
 void handle_pipe(char **cmd_args_left, char **cmd_args_right){
     int pipe_fd[2];
@@ -290,8 +290,8 @@ void handle_pipe(char **cmd_args_left, char **cmd_args_right){
     }
 
     
-    pid1 = fork(); // left child process
-    if (pid1 == 0) {
+    //pid1 = fork(); // left child process
+    if ((pid1 = fork() == 0)) {
         // apply redirection for the left 
         //apply_redirections(cmd_args_left);
 
@@ -310,8 +310,8 @@ void handle_pipe(char **cmd_args_left, char **cmd_args_right){
         } 
     }
 
-        pid2 = fork(); // right sid of the pipe child process
-    if (pid2 == 0) {
+        //pid2 = fork(); // right sid of the pipe child process
+    if ((pid2 = fork() == 0)) {
         
         dup2(pipe_fd[0], STDIN_FILENO); // redirect stdout to the pipe
         // close both ends of hte pipe in the child 
@@ -334,7 +334,6 @@ void handle_pipe(char **cmd_args_left, char **cmd_args_right){
     waitpid(pid1,NULL,0);
     waitpid(pid2,NULL,0);
 }
-
 // signal handler for sigtstp ctrl z 
 void sigint_handler(int sig){
     if (fg_pid > 0) {
@@ -347,36 +346,19 @@ void sigint_handler(int sig){
         fflush(stdout); // ensure the prompt is displayed immediately after the message
     }   
 }
-
 // signal handler for sigtstp ctrl z 
 void sigtstp_handler(int sig){
     if (fg_pid > 0) {
         // if there is a foreground process , send sigint to it 
         kill(fg_pid, SIGTSTP);
 
-        // find the command associat with the foreground process and add it 
-        /*for (int i = 0; i < job_count; i++) {
-            if (jobs[i].pid == fg_pid) {
-                jobs[i].is_running = 0;
-                //printf("\n[%d]      Stopped %s\n" ,jobs[i].job_id, jobs[i].command);
-                break;
-            }
-        }*/
         fg_pid = -1; // clear the foreground process 
-        // reprint the print
-        // took these out becaue I didnt need a two new prompt lines 
-        //write(STDOUT_FILENO, "# ", 2);
-        //tcflush(STDIN_FILENO, TCIFLUSH); 
-        //printf("# ");
-
-        //fflush(stdout); // ensure the prompt is displayed immediately after the message
     } else {
         write(STDOUT_FILENO, "\n# ", 3);
         fflush(stdout);
     }
         
 }
-
 // signal handler for sigtstp ctrl z 
 void sigchld_handler(int sig){
     int status;
@@ -401,7 +383,6 @@ void sigchld_handler(int sig){
         }
     }
 }
-
 void add_job(pid_t pid, const char *command, int is_running, int is_background){
 
     if (job_count < MAX_JOBS){ 
@@ -423,7 +404,6 @@ void add_job(pid_t pid, const char *command, int is_running, int is_background){
     }
 
 }
-
 void print_jobs() {
     for (int i = 0; i < job_count; i++) {
         printf("[%d]%c %s %s%s\n", jobs[i].job_id, jobs[i].job_marker, 
@@ -433,8 +413,6 @@ void print_jobs() {
         //if(jobs[i].is_running){    
     }
 }
-
-
 void fg_job(int job_id) {
     // Used from from Dr.Y book Page-45-49 
     int status;
@@ -518,8 +496,6 @@ void bg_job(int job_id) {
         printf("bg: job %d not found\n", job_id);
     }
 }
-
-
 void apply_redirections(char **cmd_args){
     int i = 0;
     int in_fd = -1, out_fd = -1, err_fd = -1;
@@ -601,8 +577,6 @@ void apply_redirections(char **cmd_args){
         i++;
     }
 }
-
-
 void update_job_markers(int current_job_index) {
     for (int i = 0; i < job_count; i++) {
         jobs[i].job_marker = ' ';
@@ -616,7 +590,6 @@ void update_job_markers(int current_job_index) {
     }
     
 }
-
 void remove_elements(char **args, int start, int count) {
     int i = start; 
     while (args[i + count] !=NULL) {
@@ -624,6 +597,12 @@ void remove_elements(char **args, int start, int count) {
         i++;
     }
     args[i] = NULL;
+}
+void setup_signal_handlers() {
+    // register the signal handler 
+    signal(SIGINT, sigint_handler);
+    signal(SIGTSTP, sigtstp_handler);
+    signal(SIGCHLD, sigchld_handler);
 }
 
 
