@@ -6,7 +6,7 @@ CC = gcc
 CFLAGS = -Wall -pthread
 
 # target to build the server (yashd) and the client(yash)
-TARGETS = yashd yash 
+TARGETS = yashd yash yashTestd
 
 # default target that will be built if 'make' is run without arguments
 all: $(TARGETS) # BUILD BOTH YASHD AND YASH executables
@@ -22,6 +22,8 @@ yashd: yashd.o
 yash: yash.o
 	$(CC) $(CFLAGS) yash.o -o yash
 
+yashTestd: yashTestd.o 
+	$(CC) $(CFLAGS) yashTestd.o -o yashTestd 
 
 # Compile the yashd source file into an object file 
 # make sure obj directory exisit
@@ -36,10 +38,12 @@ yash.o: yash.c yashd.h
 	$(CC) $(CFLAGS) -c yash.c -o yash.o 
 
 
+yashTestd.o: yashTestd.c yashd.h 
+	$(CC) $(CFLAGS) -c yashTestd.c -o yashTestd.o 
 # clean up rule to remove compiled object files and executables 
 clean:
 	@echo "cleaning up object files and executables....."
-	rm -f *.o yashd yash mock_server test_yash pipes
+	rm -f *.o yashd yash mock_server test_yash pipes yashTestd
 
 
 

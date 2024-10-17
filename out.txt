@@ -1,0 +1,14 @@
+Makefile
+README.md
+out.txt
+tmp
+yash
+yash.c
+yash.o
+yashTestd
+yashTestd.c
+yashTestd.o
+yashd
+yashd.c
+yashd.h
+yashd.o

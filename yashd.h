@@ -5,9 +5,16 @@
 #ifndef YASHD_H // If yashd_h is not defined
 #define YASHD_H // define yashd_h
 
+#define MAX_INPUT 200
+#define MAX_ARGS 100
+#define MAX_JOBS 20
+#define MAX_CLIENTS 10
+
+
 // including standard libraries for various functionalitites for the client
 #include <stdio.h> // standard input output library 
 #include <stdlib.h> // standard library includes functions malloc() free() 
+#include <string.h> // 
 #include <pthread.h> // pthread header
 #include <netinet/in.h> // for sockets /* inet_addr() */
 #include <arpa/inet.h>      // internet operations inetpton()
