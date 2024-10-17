@@ -8,6 +8,39 @@
 
 #include "yashd.h"
 
+
+// shared job control and pipe handling functionality from yashTestd
+extern void handle_pipes(char **cmd_args_left, char **cmd_args_mand); // function to handle piping command
+extern void handle_redirection(char **cmd_args); // function to handle file redirection commands
+extern void handle_job_control(char *command); // function to handle job control (fg bg)
+extern void setup_signal_handler(); // function to set up signal handlers 
+extern void sigint_handler(int signo); // signal handler for sigint_handler
+extern void sigtstp_handler(int signo); // signal handler for sigint_handler
+extern void sigchld_handler(int signo); // signal handler for sigint_handler
+
+
+// function prototypes
+void reusePort(int sock);
+void* serveClient(void *args);
+void sig_pipe(int n);
+void sig_chld(int n);
+void daemon_init(const char * const path, uint mask);
+void *logRequest(void *args);
+void cleanup(char *buf);
+void reusePort(int sock);
+void handle_command(int psd, char *command);
+void handle_control_signal(int psd, char signal);
+int handle_pipe(char **cmd_left, char **cmd_right);
+void add_job(pid_t, char *command, int is_running);
+void print_jobs();
+void remove_newLine(char *line);
+void fg_job(int job_id);
+void bg_job(int job_id);
+void apply_redirections(char **cmd_args);
+void run_in_background(char **cmd_args);
+
+
+
 /* Initialize path variables */
 static char* server_path = "./tmp/yashd";
 static char* log_path = "./tmp/yashd.log";
@@ -45,26 +78,7 @@ typedef struct job {
  int job_count = 0;
  pid_t fg_pid = -1; // foreground job process id
 
-// function prototypes
-void reusePort(int sock);
-void* serveClient(void *args);
-void sig_pipe(int n);
-void sig_chld(int n);
-void daemon_init(const char * const path, uint mask);
-void *logRequest(void *args);
-void cleanup(char *buf);
-void reusePort(int sock);
-void* serveClient(void *args);
-void handle_command(int psd, char *command);
-void handle_control_signal(int psd, char signal);
-int handle_pipe(char **cmd_left, char **cmd_right);
-void add_job(pid_t, char *command, int is_running);
-void print_jobs();
-void remove_newLine(char *line);
-void fg_job(int job_id);
-void bg_job(int job_id);
-void apply_redirections(char **cmd_args);
-void run_in_background(char **cmd_args);
+
 /**
  * @brief  If we are waiting reading from a pipe and
  *  the interlocutor dies abruptly (say because
@@ -76,9 +90,6 @@ void sig_pipe(int n)
    perror("Broken pipe signal");
 }
 
-/**
- * @brief Handler for SIGCHLD signal 
- */
 void sig_chld(int n)
 {
   int status;
@@ -173,12 +184,19 @@ void daemon_init(const char * const path, uint mask)
 }
 
 int main(int argc, char **argv ) {
-    int   sd, psd;
-    struct   sockaddr_in server, from;
+    int   sd, psd; // socket descriptors for server client 
+    struct   sockaddr_in server, from; // structures to hold server and client address info // length of client address structure 
     struct  hostent *hp;
-    socklen_t fromlen;
+    //socklen_t client_len = sizeof(server); 
+    //pthread_t threads[MAX_CLIENTS]; // array to hold thread ids for the client handlers
+    int client_count = 0; // counter for connected clients 
+    socklen_t fromlen; //  basically this is the size of the client address info 
     //struct sockaddr_in from;
     socklen_t length;
+
+
+    // set up the signal handler from yashtestd to manage signals (cntrl c z )
+    setup_signal_handler();
 
     // TO-DO: Initialize the daemon
     // daemon_init(server_path, 0);
@@ -188,15 +206,17 @@ int main(int argc, char **argv ) {
     printf("(TCP/Server INET ADDRESS is: %s )\n", inet_ntoa(server.sin_addr));
 
     /** Construct name of socket */
-    server.sin_family = AF_INET;    
-    server.sin_addr.s_addr = htonl(INADDR_ANY);
-    server.sin_port = htons(3820); 
+    memset(&server, 0, sizeof(server)); //  clears server address structure
+    server.sin_family = AF_INET;  // set address family to ipv4   
+    server.sin_addr.s_addr = htonl(INADDR_ANY); //  set address family
+    server.sin_port = htons(3820);  // set port number convert to network byte order 
+    
 
     /** Create socket on which to send and receive */
     sd = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP); 
-    if (sd < 0) {
-	    perror("Opening stream socket");
-	    exit(-1);
+    if (sd < 0) { //  check if socket create failed 
+	    perror("Opening stream socket"); //  print an error message if socket creation fails
+	    exit(-1);//  exit the program with a -1
     }
     
  
@@ -204,12 +224,11 @@ int main(int argc, char **argv ) {
 	  for TIME_WAIT which can be as large as 2 minutes */
     reusePort(sd);
 
-
-
-    if (bind(sd, (struct sockaddr *) &server, sizeof(server) ) < 0 ) {
-      close(sd);
+    // bind the socket to the port 
+    if (bind(sd, (struct sockaddr *) &server, sizeof(server) ) < 0 ) { // bind socket 
+      close(sd); // close the socket if bind fails 
       perror("Error binding name to stream socket");
-      exit(-1);
+      exit(-1); // exit the proram with failure status 
     }
     
     /** get port information and prints it out */
@@ -220,15 +239,31 @@ int main(int argc, char **argv ) {
     }
     printf("Server Port is: %d\n", ntohs(server.sin_port));
     
+    // Listen for incoming connections
     /** accept TCP connections from clients and thread a process to serve each request */
-    listen(sd,4);
+    //listen(sd,4); // changed to max clients 
+    if (listen(sd, MAX_CLIENTS) < 0){
+      // set socke to listen for incoming connections 
+      perror("listen failed "); // print error msg if listen fails
+      close(sd); // close the socket if listen fails
+      exit(EXIT_FAILURE); //  exit the program with failure status 
+    }
 
-    fromlen = sizeof(from);
+    fromlen = sizeof(from); //  the client_len
 
     printf("Server is ready to receive\n");
 
-    for(;;){
-      psd  = accept(sd, (struct sockaddr *)&from, &fromlen);
+    // Accepting incoming connections in an infinite loop
+    // for(;;){ //  changed from a for loop to a while loop 
+    while ((psd  = accept(sd, (struct sockaddr *)&from, &fromlen)) >= 0) { 
+      //  psd client socket &from is the client address 
+
+      if (client_count >= MAX_CLIENTS) {
+        // check if max number of clients have been reached
+        printf("Max clients reached, refuing connection\n"); // print msg indiciatin mayx clients reached
+        close(psd); // close the client socket 
+        continue;
+      }
       if (psd < 0) {
         perror("accepting connection");
         continue;
@@ -241,7 +276,7 @@ int main(int argc, char **argv ) {
           close(psd);
           continue;
       }
-      printf("Memore allocated for client arguments\n");
+      printf("Memory allocated for client arguments\n");
 
       // Set the client arguments
       clientArgs->psd = psd;
@@ -257,11 +292,13 @@ int main(int argc, char **argv ) {
       }
       printf("Thread created to serve client\n");
 
-      pthread_detach(thread); // Detach the thread to unblock it
+      pthread_detach(thread); // Detach the thread to unblock
 
-    }
+    } 
     // Destroy the mutex
     pthread_mutex_destroy(&lock);
+    //  Close the server socket when done
+    close(sd);
     return 0;
 }
 
@@ -310,10 +347,10 @@ void cleanup(char *buf)
 }
 
 void* serveClient(void *args) {
-    ClientArgs *clientArgs = (ClientArgs *)args;
-    int psd = clientArgs->psd;
+    ClientArgs *clientArgs = (ClientArgs *)args; //  cast argument to clientArgs struct
+    int psd = clientArgs->psd; // Get the clients socket descriptor 
     struct sockaddr_in from = clientArgs->from;
-    char buffer[BUFFER_SIZE];
+    char buffer[BUFFER_SIZE]; // buffer to store received data 
     memset(buffer, 0, BUFFER_SIZE);
     int bytesRead;
     int pipefd_stdout[2], pipefd_stdin[2];
@@ -347,116 +384,119 @@ void* serveClient(void *args) {
       printf("%s",buffer);
  
       // Handle: CMD<blank><Command_String>\n
-      if (strncmp(buffer, "CMD ", 4) == 0) {
+      if (strncmp(buffer, "CTL ", 4) == 0) { 
+        // checking to see if the message is a control signal
+          handle_control_signal(psd, buffer[4]); // handle the control signal contrl c
+          
+      } else if (strncmp(buffer, "CMD ", 4) == 0) { 
+        // check if the message is a command 
         // Extract the command string
-        command = buffer + 4;
+        char *command = buffer + 4; // extract the command string skip cmd
         command[strcspn(command, "\n")] = '\0'; // Remove the newline character
-
+        
         // Create pipes for communication between parent and child and handle command 
         if (pipe(pipefd_stdout) == -1 || pipe(pipefd_stdin) == -1) {
           perror("pipe");
           exit(EXIT_FAILURE);
         }
-
-        printf("Command: %s-%s\n", buffer, command);
+        printf("Command: %s-%s\n", buffer, command); //  print the command for debugging purposes
         // Allocate memory for LogRequestArgs
         LogRequestArgs *logArgs = malloc(sizeof(LogRequestArgs));
-
-        if (logArgs == NULL) {
-          perror("Error allocating memory for log request");
-          continue;
+        if (logArgs == NULL) { // check if memory allocation failed 
+          perror("Error allocating memory for log request"); //  print error message 
+          continue; // continue to the next iteration to accept new commands
         }
-        // Copy the request and client information to the struc
-        strncpy(logArgs->request, command, sizeof(logArgs->request) - 1);
-        logArgs->from = from;
 
-        handle_command(psd, command); // function to handle command execution        
+        // Copy the request and client information to the struc
+        strncpy(logArgs->request, command, sizeof(logArgs->request) - 1); // copy the command to the log request 
+        logArgs->from = from; // set the client address
+        //  handle command execution create new thread for logging 
+        handle_command(psd, command); // function to handle command execution 
+        
         // Create a new thread for logging
-        if (pthread_create(&p, NULL, logRequest, (void *)logArgs) != 0) {
-          perror("Error creating log request thread");
+        if (pthread_create(&p, NULL, logRequest, (void *)logArgs) != 0) { // create a new thread for logging
+          perror("Error creating log request thread"); //print error
           free(logArgs); // Free the allocated memory if thread creation fails
         } else {
           pthread_detach(p); // Detach the thread to allow it to run independently
           }
-      } 
+  
         // Fork a child process to execute the command
         if ((pid = fork()) == -1) {
             perror("fork");
             exit(EXIT_FAILURE);
         }
 
-        // child process execute the command
-        if (pid == 0) {
-          // Child process
-          close(pipefd_stdout[0]); // Close the read end of the stdout pipe
-          close(pipefd_stdin[1]);  // Close the write end of the stdin pipe
-          
-          dup2(pipefd_stdout[1], STDOUT_FILENO); // Redirect stdout to the write end of the stdout pipe
-          dup2(pipefd_stdout[1], STDERR_FILENO); // Redirect stderr to the write end of the stdout pipe
-          dup2(pipefd_stdin[0], STDIN_FILENO);   // Redirect stdin to the read end of the stdin pipe
-          
-          close(pipefd_stdout[1]);
-          close(pipefd_stdin[0]);
+          // child process execute the command
+          if (pid == 0) {
+            // Child process
+            close(pipefd_stdout[0]); // Close the read end of the stdout pipe
+            close(pipefd_stdin[1]);  // Close the write end of the stdin pipe
 
-         /*We need to toeknize the command into an argument array before paassing it to execvp */
-         // tokenize the command string into arguments
-         char *args[10];
-         int i = 0;
-         args[i] = strtok(command, " ");
-         while (args[i] != NULL && i < 9)
-         {
-          /* code */
-          i++;
-          args[i] = strtok(NULL, " ");
-         }
+            dup2(pipefd_stdout[1], STDOUT_FILENO); // Redirect stdout to the write end of the stdout pipe
+            dup2(pipefd_stdout[1], STDERR_FILENO); // Redirect stderr to the write end of the stdout pipe
+            dup2(pipefd_stdin[0], STDIN_FILENO);   // Redirect stdin to the read end of the stdin pipe
 
-         // execute the command 
-         if (execvp(args[0], args) == -1) {
-          //perror("execvp failed");
-          _exit(EXIT_FAILURE);
-         }
+            close(pipefd_stdout[1]); //  close the write end of stdout pipe after redirection 
+            close(pipefd_stdin[0]); // close the read end of stdin pipe after redirection
 
-         printf("Line 411 \n# "); // todo testing to see if this is the one causing problems
-         //Send # to indicate the end of the command output
-         //exit(EXIT_SUCCESS);
+            /*We need to toeknize the command into an argument array before paassing it to execvp */
+            // tokenize the command string into arguments
+            char *args[10];
+            int i = 0;
+            args[i] = strtok(command, " "); // split the command into tokens by space
+            while (args[i] != NULL && i < 9)
+            {
+             /* code */
+             i++;
+             args[i] = strtok(NULL, " "); // continue splitting into tokens 
+            }
 
-        } else {
-          // Parent process
-          fg_pid = pid; // set the foreground job
-          close(pipefd_stdout[1]); // Close the write end of the stdout pipe
-          close(pipefd_stdin[0]);  // Close the read end of the stdin pipe
-          commandRunning = 1;
-          // Read the child's output from the pipe and send it to the client socket
-          while ((bytesRead = read(pipefd_stdout[0], buffer, sizeof(buffer))) > 0) {
-            send(psd, buffer, bytesRead, 0);
-          }
-          //send(psd, "\n# ", sizeof("\n# "), 0);
-          
-          close(pipefd_stdout[0]);
-          send(psd, "\n#436s ", 3, 0);
+            // execute the command 
+            if (execvp(args[0], args) == -1) {
+             //perror("execvp failed");
+             _exit(EXIT_FAILURE);
+            }
 
-          // Wait for the child process to finish
-          waitpid(pid, NULL, 0);
-          commandRunning = 0;
-          fg_pid = -1; // clear foreground job
+            printf("Line 411 \n# "); // todo testing to see if this is the one causing problems
+            //Send # to indicate the end of the command output
+            //exit(EXIT_SUCCESS);
+          } else {
+            // Parent process
+            fg_pid = pid; // set the foreground job
+            close(pipefd_stdout[1]); // Close the write end of the stdout pipe
+            close(pipefd_stdin[0]);  // Close the read end of the stdin pipe
+            commandRunning = 1;
+
+            // Read the child's output from the pipe and send it to the client socket
+            while ((bytesRead = read(pipefd_stdout[0], buffer, sizeof(buffer))) > 0) {
+              send(psd, buffer, bytesRead, 0);
+            }
+            //send(psd, "\n# ", sizeof("\n# "), 0);
+
+            close(pipefd_stdout[0]);
+            send(psd, "\n#436s ", 3, 0);
+
+            // Wait for the child process to finish
+            waitpid(pid, NULL, 0);
+            commandRunning = 0;
+            fg_pid = -1; // clear foreground job
         }
+      }
         //send(psd, "\n# ", 3, 0);
     
         // Send # to indicate the end of the command output
-        if (send(psd, "\n#" , sizeof("\n#"), 0) <0 ) {
+        if (send(psd, "s\n# " , sizeof("s\n#"), 0) <0 ) {
           perror("sending stream message");
-        } else if (strncmp(buffer, "CTL ", 4) == 0) { 
-          handle_control_signal(psd, buffer[4]);
-          
         } else {
           // Handle plain text input
           if (commandRunning) {
               // Write the plain text to the stdin of the running command
               write(pipefd_stdin[1], buffer, bytesRead);
-              send(psd, "\n#456s ", 3, 0);
+              send(psd, "\n#499s ", 3, 0);
           } else {
               // If no command is running, send an error message
-              const char *errorMsg = "\n#459s "; // Error: No command is currently running.
+              const char *errorMsg = "\n#502s "; // Error: No command is currently running.
               send(psd, errorMsg, strlen(errorMsg), 0);
           }
         }
@@ -496,7 +536,6 @@ void handle_command(int psd, char *command) {
     
   }
 
-
 void handle_control_signal(int psd, char controlChar) {
   // Handle: CTL<blank><char[c|z|d]>\n
   if (controlChar == 'c') {
@@ -522,15 +561,6 @@ void handle_control_signal(int psd, char controlChar) {
     send(psd, "\n#522s ", 3, 0);
 
 }
-
-
-
-/**
- * @brief detects if a command has a pipe and splits it into two commands 
-
- * @return int returns 1 if a pip is found nd command is split otherwise 0
- */
-
 
 int handle_pipe(char **cmd_left, char **cmd_right) {
     int pipe_fd[2];
@@ -701,12 +731,19 @@ void fg_job(int job_id) {
 void bg_job(int job_id) {
     for (int i = 0; i < job_count; i++) {
         if (jobs[i].job_id == job_id && !jobs[i].is_running) {
-          // resume the jobs in the backgroun 
+          // resume the jobs in the background 
           kill(-jobs[i].pid, SIGCONT);
           jobs[i].is_running = 1;
-          printf("[%d] + %s &\n", jobs[i].job_id, jobs[i].command); // prints teh command when bringing to the foreground
+          printf("[%d] + %s &\n", jobs[i].job_id, jobs[i].command); // prints the command when bringing to the foreground
           return;
         }
     }
     printf("Job not found or already running\n");
+}
+
+void setup_signal_handler() {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = SIG_IGN;
+  sigaction(SIGCHLD, &sa, NULL);
 }
