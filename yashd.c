@@ -740,3 +740,10 @@ void bg_job(int job_id) {
     }
     printf("Job not found or already running\n");
 }
+
+void setup_signal_handler() {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = SIG_IGN;
+  sigaction(SIGCHLD, &sa, NULL);
+}
