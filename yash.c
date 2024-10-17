@@ -4,7 +4,7 @@
  Step 2: Set up the Test function to send a command to the server 
  step 3: set up the signal handlers - ctrl c sigint control z sigtstp
  step 4: Establish a connection to the server 
- step 5: set up the command input loop 
+ step 5: set up the command input loop  
  step 6: close the connection 
  step 7 main function 
 */
