@@ -618,10 +618,14 @@ void apply_redirections(char **cmd_args){
     while (cmd_args[i] != NULL){
         /* code */
         if (strcmp(cmd_args[i], "<") == 0){
+            if (cmd_args[i + 1] == NULL) {
+                fprintf(stderr, " yash: expected filename after '<'\n");
+                exit(EXIT_FAILURE);
+            }
 
             in_fd = open(cmd_args[i + 1], O_RDONLY); // input redirection 
             if (in_fd < 0 ){
-                cmd_args[i] = NULL;
+                //cmd_args[i] = NULL;
                 //cmd_args[i - 1] = NULL;
                 perror("yash");
                 exit(EXIT_FAILURE); // exit child process on failure
@@ -631,18 +635,15 @@ void apply_redirections(char **cmd_args){
             dup2(in_fd, STDIN_FILENO); // replace stdin with the file 
             close(in_fd);
 
-            // shift arguements left to remove redirecton operator and file name 
-            // doing this because err1.txt and err2.txt are not getting created for redirection
-            for (int j = i; cmd_args[j + 2] != NULL; j++){
-                cmd_args[j] = cmd_args[j+ 2];
-            }
-            // shift remaing arguments 
-            cmd_args[i] = NULL; // remove < 
-            //cmd_args[i + 1] = NULL; // remove the file name 
-            i--; // adjust index to recheck this position 
+            remove_elements(cmd_args, i , 2);
+            continue; // recheck current position 
 
-        } 
-        else if (strcmp(cmd_args[i], ">") == 0) { 
+        } else if (strcmp(cmd_args[i], ">") == 0) { 
+            if (cmd_args[i +1] == NULL) {
+                fprintf(stderr, " yash: expected file name after '>\n");
+                exit(EXIT_FAILURE);
+            }
+
             // output direction 
             out_fd = open(cmd_args[i + 1], O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH );
             if (out_fd < 0) {
@@ -651,28 +652,27 @@ void apply_redirections(char **cmd_args){
                 //return;
             }
             // debugging 
-            printf("redirection output file : %s\n" , cmd_args[i+1]);
+            //printf("redirection output file : %s\n" , cmd_args[i+1]);
 
             dup2(out_fd,STDOUT_FILENO);
             close(out_fd);
 
-            // shift arguements left to remove redirecton operator and file name 
-            // doing this because err1.txt and err2.txt are not getting created for redirection
-            for (int j = i; cmd_args[j + 2] != NULL; j++){
-                cmd_args[j] = cmd_args[j+ 2];
+            remove_elements(cmd_args, i , 2);
+            continue; // recheck current position 
+        } else if (strcmp(cmd_args[i], "2>") == 0){
+            // error redirection 
+            //err_fd = open(cmd_args[i + 1],O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH );
+            if (cmd_args[i+1] == NULL) {
+                perror("yash expected filename after 2>\n");
+                exit (EXIT_FAILURE);
+                //return;
             }
 
-            cmd_args[i] = NULL;
-            // cmd_args[i + 1] = NULL;
-            i--;
-        } 
-        else if (strcmp(cmd_args[i], "2>") == 0){
             // error redirection 
             err_fd = open(cmd_args[i + 1],O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH );
             if (err_fd < 0) {
                 perror("yash");
-                exit (EXIT_FAILURE);
-                //return;
+                exit(EXIT_FAILURE);
             }
             //printf("redirection output file : %s\n" , cmd_args[i+1]);
             dup2(err_fd,STDERR_FILENO);
@@ -680,12 +680,14 @@ void apply_redirections(char **cmd_args){
 
             // shift arguements left to remove redirecton operator and file name 
             // doing this because err1.txt and err2.txt are not getting created for redirection
-            for (int j = i; cmd_args[j + 2] != NULL; j++){
-                cmd_args[j] = cmd_args[j+ 2];
-            }
-            cmd_args[i] = NULL;
+            //for (int j = i; cmd_args[j + 2] != NULL; j++){
+            //    cmd_args[j] = cmd_args[j+ 2];
+            //}
+            //cmd_args[i] = NULL;
             //cmd_args[i + 1] = NULL;
-            i--;
+            //i--;
+            remove_elements(cmd_args, i, 2);
+            continue;
         }
         i++;
     }

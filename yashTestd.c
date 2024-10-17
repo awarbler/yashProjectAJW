@@ -289,15 +289,11 @@ void handle_pipe(char **cmd_args_left, char **cmd_args_right){
         return;
     }
 
-    
     //pid1 = fork(); // left child process
     if ((pid1 = fork() == 0)) {
-        // apply redirection for the left 
-        //apply_redirections(cmd_args_left);
-
+        
         // first child left side command like ls
         dup2(pipe_fd[1], STDOUT_FILENO); // redirect stdout to the pipe
-        
         close(pipe_fd[0]);
         close(pipe_fd[1]);
 
@@ -496,87 +492,7 @@ void bg_job(int job_id) {
         printf("bg: job %d not found\n", job_id);
     }
 }
-void apply_redirections(char **cmd_args){
-    int i = 0;
-    int in_fd = -1, out_fd = -1, err_fd = -1;
 
-    while (cmd_args[i] != NULL){
-        /* code */
-        if (strcmp(cmd_args[i], "<") == 0){
-            if (cmd_args[i + 1] == NULL) {
-                fprintf(stderr, " yash: expected filename after '<'\n");
-                exit(EXIT_FAILURE);
-            }
-
-            in_fd = open(cmd_args[i + 1], O_RDONLY); // input redirection 
-            if (in_fd < 0 ){
-                //cmd_args[i] = NULL;
-                //cmd_args[i - 1] = NULL;
-                perror("yash");
-                exit(EXIT_FAILURE); // exit child process on failure
-                //return;
-            }
-            
-            dup2(in_fd, STDIN_FILENO); // replace stdin with the file 
-            close(in_fd);
-
-            remove_elements(cmd_args, i , 2);
-            continue; // recheck current position 
-
-        } else if (strcmp(cmd_args[i], ">") == 0) { 
-            if (cmd_args[i +1] == NULL) {
-                fprintf(stderr, " yash: expected file name after '>\n");
-                exit(EXIT_FAILURE);
-            }
-
-            // output direction 
-            out_fd = open(cmd_args[i + 1], O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH );
-            if (out_fd < 0) {
-                perror("yash");
-                exit(EXIT_FAILURE);
-                //return;
-            }
-            // debugging 
-            //printf("redirection output file : %s\n" , cmd_args[i+1]);
-
-            dup2(out_fd,STDOUT_FILENO);
-            close(out_fd);
-
-            remove_elements(cmd_args, i , 2);
-            continue; // recheck current position 
-        } else if (strcmp(cmd_args[i], "2>") == 0){
-            // error redirection 
-            //err_fd = open(cmd_args[i + 1],O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH );
-            if (cmd_args[i+1] == NULL) {
-                perror("yash expected filename after 2>\n");
-                exit (EXIT_FAILURE);
-                //return;
-            }
-
-            // error redirection 
-            err_fd = open(cmd_args[i + 1],O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH );
-            if (err_fd < 0) {
-                perror("yash");
-                exit(EXIT_FAILURE);
-            }
-            //printf("redirection output file : %s\n" , cmd_args[i+1]);
-            dup2(err_fd,STDERR_FILENO);
-            close(err_fd);
-
-            // shift arguements left to remove redirecton operator and file name 
-            // doing this because err1.txt and err2.txt are not getting created for redirection
-            //for (int j = i; cmd_args[j + 2] != NULL; j++){
-            //    cmd_args[j] = cmd_args[j+ 2];
-            //}
-            //cmd_args[i] = NULL;
-            //cmd_args[i + 1] = NULL;
-            //i--;
-            remove_elements(cmd_args, i, 2);
-            continue;
-        }
-        i++;
-    }
-}
 void update_job_markers(int current_job_index) {
     for (int i = 0; i < job_count; i++) {
         jobs[i].job_marker = ' ';
